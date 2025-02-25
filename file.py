@@ -39,31 +39,31 @@ def train_gpt2(data_path, model_name='gpt2', output_dir='./gpt2_finetuned'):
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
 
-#def generate_text(prompt, model_path='./gpt2_finetuned', max_length=100):
-#    tokenizer = GPT2Tokenizer.from_pretrained(model_path)
-#    model = GPT2LMHeadModel.from_pretrained(model_path)
-#    
-#    inputs = tokenizer.encode(prompt, return_tensors='pt')
-#    output = model.generate(inputs, max_length=max_length, num_return_sequences=1)
-#    
-#    return tokenizer.decode(output[0], skip_special_tokens=True)
-
-
-
 def generate_text(prompt, model_path='./gpt2_finetuned', max_length=100):
     tokenizer = GPT2Tokenizer.from_pretrained(model_path)
     model = GPT2LMHeadModel.from_pretrained(model_path)
     
-    # تنظیم pad_token_id
-    model.config.pad_token_id = tokenizer.eos_token_id
-
-    # توکنایز کردن ورودی
-    inputs = tokenizer.encode(prompt, return_tensors='pt', padding=True, truncation=True)
-    
-    # تولید متن با استفاده از مدل
-    output = model.generate(inputs, max_length=max_length, num_return_sequences=1, attention_mask=inputs["attention_mask"])
+    inputs = tokenizer.encode(prompt, return_tensors='pt')
+    output = model.generate(inputs, max_length=max_length, num_return_sequences=1)
     
     return tokenizer.decode(output[0], skip_special_tokens=True)
+
+
+
+#def generate_text(prompt, model_path='./gpt2_finetuned', max_length=100):
+#    tokenizer = GPT2Tokenizer.from_pretrained(model_path)
+#    model = GPT2LMHeadModel.from_pretrained(model_path)
+#    
+#    # تنظیم pad_token_id
+#    model.config.pad_token_id = tokenizer.eos_token_id
+#
+#    # توکنایز کردن ورودی
+#    inputs = tokenizer.encode(prompt, return_tensors='pt', padding=True, truncation=True)
+#    
+#    # تولید متن با استفاده از مدل
+#    output = model.generate(inputs, max_length=max_length, num_return_sequences=1, attention_mask=inputs["attention_mask"])
+#    
+#    return tokenizer.decode(output[0], skip_special_tokens=True)
 
 
 
