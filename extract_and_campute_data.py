@@ -1,7 +1,7 @@
 import json
 
 # بارگذاری داده‌های تمیز شده
-with open("cleaned_messages_2.json", "r", encoding="utf-8") as f:
+with open("data/cleaned_messages_2.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 dialogs = []
