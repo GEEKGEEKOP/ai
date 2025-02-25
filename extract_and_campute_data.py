@@ -1,45 +1,15 @@
-from bs4 import BeautifulSoup
 import json
 
-# خواندن فایل HTML
-with open("messages.html", "r", encoding="utf-8") as f:
-    html_content = f.read()
+# بارگذاری داده‌های JSON
+with open("messages.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
 
-# پارس کردن HTML
-soup = BeautifulSoup(html_content, "lxml")
+# فیلتر کردن داده‌ها: نگه داشتن فقط آنهایی که کلید "text" دارای مقدار معتبر است
+cleaned_data = [item for item in data if isinstance(item.get("text"), str) and item.get("text").strip()]
 
-# پیدا کردن بخش تاریخچه (history) که پیام‌ها در آن قرار دارند
-history_div = soup.find("div", class_="history")
-messages = history_div.find_all("div", class_="message")
+# ذخیره داده‌های تمیز شده در یک فایل جدید
+with open("cleaned_messages.json", "w", encoding="utf-8") as f:
+    json.dump(cleaned_data, f, ensure_ascii=False, indent=4)
 
-data = []
-
-for message in messages:
-    msg = {}
-    msg["id"] = message.get("id")
-    msg["classes"] = message.get("class")
-    
-    # استخراج نام فرستنده (اگر موجود باشد)
-    sender_div = message.find("div", class_="from_name")
-    msg["sender"] = sender_div.get_text(strip=True) if sender_div else None
-    
-    # استخراج تاریخ و زمان (اگر موجود باشد)
-    date_div = message.find("div", class_="pull_right date details")
-    if date_div:
-        # اگر تگ دارای attribute 'title' باشد از آن استفاده می‌کنیم، در غیر این صورت متن داخل تگ
-        msg["time"] = date_div.get("title", date_div.get_text(strip=True))
-    else:
-        msg["time"] = None
-    
-    # استخراج متن پیام
-    text_div = message.find("div", class_="text")
-    msg["text"] = text_div.get_text(separator=" ", strip=True) if text_div else None
-    
-    data.append(msg)
-
-# ذخیره اطلاعات استخراج شده در یک فایل JSON
-with open("messages.json", "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=4)
-
-print("اطلاعات با موفقیت در messages.json ذخیره شدند.")
+print(f"تمیزسازی انجام شد. تعداد کل داده‌ها: {len(data)}. تعداد داده‌های باقی‌مانده: {len(cleaned_data)}.")
 
