@@ -1,15 +1,17 @@
 import json
 
-# بارگذاری داده‌های JSON
-with open("messages.json", "r", encoding="utf-8") as f:
+# بارگذاری داده‌های تمیز شده
+with open("cleaned_messages_2.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
-# فیلتر کردن داده‌ها: نگه داشتن فقط آنهایی که کلید "text" دارای مقدار معتبر است
-cleaned_data = [item for item in data if isinstance(item.get("sender"), str) and item.get("sender").strip()]
+dialogs = []
+for item in data:
+    sender = item.get("sender", "Unknown")
+    text = item.get("text", "").strip()
+    # در صورتی که متن موجود نباشد، آن پیام را رد می‌کنیم
+    if text:
+        dialogs.append((sender, text))
 
-# ذخیره داده‌های تمیز شده در یک فایل جدید
-with open("cleaned_messages_2.json", "w", encoding="utf-8") as f:
-    json.dump(cleaned_data, f, ensure_ascii=False, indent=4)
-
-print(f"تمیزسازی انجام شد. تعداد کل داده‌ها: {len(data)}. تعداد داده‌های باقی‌مانده: {len(cleaned_data)}.")
+# چاپ خروجی به صورت یک متغیر پایتون
+print("dialogs =", dialogs)
 
