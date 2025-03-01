@@ -1,25 +1,41 @@
-const mineflayer = require('mineflayer');
-
-// تنظیمات ربات
-const bot = mineflayer.createBot({
-    host: 'localhost', // آدرس سرور (برای لوکال همینو بذار)
-    port: 38303,      // پورت سرور (پیش‌فرض ماینکرفته)
-    username: 'TreeBot',
-});
-
-// وقتی ربات وارد بازی شد
-bot.on('spawn', () => {
-    console.log('Bot is here !');
-});
-
+const mineflayer = require('mineflayer')
+const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const Vec3 = require('vec3')
 
+// ایجاد ربات با استفاده از Mineflayer
+function createBot() {
+  const bot = mineflayer.createBot({
+    host: 'localhost',    // آدرس سرور (یا آدرس دلخواه)
+    port: 25565,          // پورت سرور
+    username: 'BotName',  // نام ربات (می‌توانید آن را تغییر دهید)
+    version: '1.16.4'     // نسخه بازی پیشنهادی
+  })
+
+  // بارگذاری پلاگین pathfinder
+  bot.loadPlugin(pathfinder)
+
+  // وقتی ربات وارد بازی شد:
+  bot.once('spawn', () => {
+    // تنظیم حرکات پیش‌فرض برای pathfinder
+    const defaultMovements = new Movements(bot)
+    bot.pathfinder.setMovements(defaultMovements)
+
+    bot.chat("ربات وارد بازی شد و آماده کار است!")
+    // فراخوانی تابع استخراج درخت
+    mineTree(bot)
+  })
+
+  bot.on('error', (err) => console.log(err))
+  bot.on('end', () => console.log('ربات از بازی خارج شد'))
+}
+
+// تابع استخراج درخت: پیدا کردن بلوک‌های چوب و کندن آن‌ها به صورت بازگشتی
 async function mineTree(bot) {
   // پیدا کردن بلوک‌های چوب (log) در نزدیکی ربات
   const logs = bot.findBlocks({
     matching: block => block && block.name.includes('log'),
     maxDistance: 32, // شعاع جستجو
-    count: 10      // حداکثر تعداد بلوک‌های پیدا شده
+    count: 10        // حداکثر تعداد بلوک‌های پیدا شده
   })
 
   if (logs.length === 0) {
@@ -27,11 +43,11 @@ async function mineTree(bot) {
     return
   }
 
-  // استفاده از اولین بلوک چوب به عنوان نقطه شروع
+  // انتخاب اولین بلوک چوب به عنوان نقطه شروع
   const startBlock = bot.blockAt(logs[0])
   const visited = new Set()
 
-  // تابع بازگشتی برای کندن بلوک‌های درخت
+  // تابع بازگشتی برای کندن بلوک‌های مرتبط با درخت
   async function digLog(block) {
     if (!block) return
     const posKey = `${block.position.x},${block.position.y},${block.position.z}`
@@ -39,14 +55,14 @@ async function mineTree(bot) {
     if (!block.name.includes('log')) return
     visited.add(posKey)
 
-    // اگر بلوک دور است، با استفاده از pathfinder به آن نزدیک می‌شویم
+    // در صورت فاصله زیاد از بلوک، با استفاده از pathfinder به آن نزدیک می‌شویم
     const distance = bot.entity.position.distanceTo(block.position)
     if (distance > 3) {
-      const { GoalBlock } = require('mineflayer-pathfinder').goals
+      const { GoalBlock } = goals
       await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z))
     }
 
-    // کندن بلوک
+    // تلاش برای کندن بلوک
     try {
       await bot.dig(block)
       bot.chat(`بلوکی در ${block.position} کندن شد`)
@@ -54,7 +70,7 @@ async function mineTree(bot) {
       console.error("خطا در کندن بلوک:", err)
     }
 
-    // بررسی بلوک‌های همجوار (شش جهت اصلی) برای ادامه کندن درخت
+    // بررسی جهت‌های اطراف (بالا، پایین، چپ، راست، جلو، عقب) برای ادامه روند کندن بلوک‌های چوب
     const directions = [
       new Vec3(1, 0, 0),
       new Vec3(-1, 0, 0),
@@ -76,12 +92,6 @@ async function mineTree(bot) {
   await digLog(startBlock)
 }
 
+// راه‌اندازی ربات
+createBot()
 
-bot.once('spawn', async () => {
-  // استفاده از حلقه for برای 64 بار تلاش جهت ماین کردن dirt
-  //for (let i = 0; i < 64; i++) {
-  await mineTree();
-  //  console.log(`تعداد dirt جمع‌آوری شده: ${i + 1}`);
-  //}
-  console.log("64 dirt جمع شد!");
-});
