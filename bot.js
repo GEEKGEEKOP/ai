@@ -3,7 +3,7 @@ const mineflayer = require('mineflayer');
 // تنظیمات ربات
 const bot = mineflayer.createBot({
     host: 'localhost', // آدرس سرور (برای لوکال همینو بذار)
-    port: 35759,      // پورت سرور (پیش‌فرض ماینکرفته)
+    port: 38303,      // پورت سرور (پیش‌فرض ماینکرفته)
     username: 'TreeBot',
 });
 
@@ -12,60 +12,76 @@ bot.on('spawn', () => {
     console.log('Bot is here !');
 });
 
+const Vec3 = require('vec3')
 
-// تابع کمکی برای ایجاد تأخیر
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+async function mineTree(bot) {
+  // پیدا کردن بلوک‌های چوب (log) در نزدیکی ربات
+  const logs = bot.findBlocks({
+    matching: block => block && block.name.includes('log'),
+    maxDistance: 32, // شعاع جستجو
+    count: 10      // حداکثر تعداد بلوک‌های پیدا شده
+  })
 
-// تابعی که به صورت غیرهمزمان یک بلوک dirt را پیدا کرده و ماین می‌کند
-async function digDirtAsync() {
-  while (true) {
-    const dirtBlock = bot.findBlock({
-      matching: block => block.name === 'dirt',
-      maxDistance: 10
-    });
-    if (dirtBlock) {
-      await new Promise((resolve) => {
-        bot.dig(dirtBlock, (err) => {
-          if (err) {
-            console.log("خطا در ماین کردن dirt:", err);
-          } else {
-            console.log("Dirt ماین شد!");
-          }
-          resolve();
-        });
-      });
-      return; // پس از موفقیت یا تلاش ناموفق، از حلقه خارج شو
-    } else {
-      console.log("هیچ dirt در نزدیکی یافت نشد، حرکت به جلو...");
-      bot.setControlState('forward', true);
-      await delay(1000); // حرکت به جلو به مدت ۱ ثانیه
-      bot.setControlState('forward', false);
-      await delay(500); // کمی صبر کن تا وضعیت بروزرسانی شود
+  if (logs.length === 0) {
+    bot.chat("هیچ درختی پیدا نشد!")
+    return
+  }
+
+  // استفاده از اولین بلوک چوب به عنوان نقطه شروع
+  const startBlock = bot.blockAt(logs[0])
+  const visited = new Set()
+
+  // تابع بازگشتی برای کندن بلوک‌های درخت
+  async function digLog(block) {
+    if (!block) return
+    const posKey = `${block.position.x},${block.position.y},${block.position.z}`
+    if (visited.has(posKey)) return
+    if (!block.name.includes('log')) return
+    visited.add(posKey)
+
+    // اگر بلوک دور است، با استفاده از pathfinder به آن نزدیک می‌شویم
+    const distance = bot.entity.position.distanceTo(block.position)
+    if (distance > 3) {
+      const { GoalBlock } = require('mineflayer-pathfinder').goals
+      await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z))
+    }
+
+    // کندن بلوک
+    try {
+      await bot.dig(block)
+      bot.chat(`بلوکی در ${block.position} کندن شد`)
+    } catch (err) {
+      console.error("خطا در کندن بلوک:", err)
+    }
+
+    // بررسی بلوک‌های همجوار (شش جهت اصلی) برای ادامه کندن درخت
+    const directions = [
+      new Vec3(1, 0, 0),
+      new Vec3(-1, 0, 0),
+      new Vec3(0, 1, 0),
+      new Vec3(0, -1, 0),
+      new Vec3(0, 0, 1),
+      new Vec3(0, 0, -1)
+    ]
+
+    for (const dir of directions) {
+      const neighborPos = block.position.plus(dir)
+      const neighborBlock = bot.blockAt(neighborPos)
+      if (neighborBlock && neighborBlock.name.includes('log')) {
+         await digLog(neighborBlock)
+      }
     }
   }
+
+  await digLog(startBlock)
 }
-
-/*
-// وقتی چت کنن باهاش
-bot.on('chat', (username, message) => {
-    if (message === 'chop') {
-        findAndChopTree(); // دستور برای زدن درخت
-    }
-    if (message === 'mine dirt') {
-
-
-    }
-});*/
-
 
 
 bot.once('spawn', async () => {
   // استفاده از حلقه for برای 64 بار تلاش جهت ماین کردن dirt
-  for (let i = 0; i < 64; i++) {
-    await digDirtAsync();
-    console.log(`تعداد dirt جمع‌آوری شده: ${i + 1}`);
-  }
+  //for (let i = 0; i < 64; i++) {
+  await mineTree();
+  //  console.log(`تعداد dirt جمع‌آوری شده: ${i + 1}`);
+  //}
   console.log("64 dirt جمع شد!");
 });
