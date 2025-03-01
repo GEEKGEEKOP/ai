@@ -6,7 +6,7 @@ const Vec3 = require('vec3')
 function createBot() {
   const bot = mineflayer.createBot({
     host: 'localhost',    // آدرس سرور (یا آدرس دلخواه)
-    port: 25565,          // پورت سرور
+    port: 35159,          // پورت سرور
     username: 'BotName',  // نام ربات (می‌توانید آن را تغییر دهید)
     version: '1.16.4'     // نسخه بازی پیشنهادی
   })
