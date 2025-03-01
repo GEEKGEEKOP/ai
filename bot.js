@@ -2,94 +2,127 @@ const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const Vec3 = require('vec3')
 
-// ایجاد ربات با استفاده از Mineflayer
+// تابع کمکی برای شمارش بلوک‌های چوب در موجودی ربات
+function countWoodLogs(bot) {
+  let total = 0
+  for (const item of bot.inventory.items()) {
+    if (item.name.includes('log')) {
+      total += item.count
+    }
+  }
+  return total
+}
+
+// ایجاد ربات
 function createBot() {
   const bot = mineflayer.createBot({
-    host: 'localhost',    // آدرس سرور (یا آدرس دلخواه)
+    host: 'localhost',    // آدرس سرور
     port: 35159,          // پورت سرور
-    username: 'BotName',  // نام ربات (می‌توانید آن را تغییر دهید)
+    username: 'BotName',  // نام ربات
     version: '1.16.4'     // نسخه بازی پیشنهادی
   })
 
-  // بارگذاری پلاگین pathfinder
   bot.loadPlugin(pathfinder)
 
-  // وقتی ربات وارد بازی شد:
   bot.once('spawn', () => {
-    // تنظیم حرکات پیش‌فرض برای pathfinder
     const defaultMovements = new Movements(bot)
     bot.pathfinder.setMovements(defaultMovements)
-
     bot.chat("ربات وارد بازی شد و آماده کار است!")
-    // فراخوانی تابع استخراج درخت
-    mineTree(bot)
+    // شروع عملیات استخراج تا رسیدن به 64 بلوک چوب
+    mine64Logs(bot).catch(err => console.error(err))
   })
 
   bot.on('error', (err) => console.log(err))
   bot.on('end', () => console.log('ربات از بازی خارج شد'))
 }
 
-// تابع استخراج درخت: پیدا کردن بلوک‌های چوب و کندن آن‌ها به صورت بازگشتی
-async function mineTree(bot) {
-  // پیدا کردن بلوک‌های چوب (log) در نزدیکی ربات
-  const logs = bot.findBlocks({
-    matching: block => block && block.name.includes('log'),
-    maxDistance: 32, // شعاع جستجو
-    count: 10        // حداکثر تعداد بلوک‌های پیدا شده
-  })
+// تابع بازگشتی برای کندن یک کلاستر (درخت) از بلوک‌های چوب
+async function digLog(bot, block, visited, stopCallback) {
+  if (!block) return
+  const posKey = `${block.position.x},${block.position.y},${block.position.z}`
+  if (visited.has(posKey)) return
+  if (!block.name.includes('log')) return
+  visited.add(posKey)
 
-  if (logs.length === 0) {
-    bot.chat("هیچ درختی پیدا نشد!")
+  // اگر موجودی 64 بلوک چوب یا بیشتر شده باشد، عملیات متوقف می‌شود
+  if (countWoodLogs(bot) >= 64) {
+    stopCallback()
     return
   }
 
-  // انتخاب اولین بلوک چوب به عنوان نقطه شروع
-  const startBlock = bot.blockAt(logs[0])
-  const visited = new Set()
-
-  // تابع بازگشتی برای کندن بلوک‌های مرتبط با درخت
-  async function digLog(block) {
-    if (!block) return
-    const posKey = `${block.position.x},${block.position.y},${block.position.z}`
-    if (visited.has(posKey)) return
-    if (!block.name.includes('log')) return
-    visited.add(posKey)
-
-    // در صورت فاصله زیاد از بلوک، با استفاده از pathfinder به آن نزدیک می‌شویم
-    const distance = bot.entity.position.distanceTo(block.position)
-    if (distance > 3) {
-      const { GoalBlock } = goals
-      await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z))
-    }
-
-    // تلاش برای کندن بلوک
+  // اگر بلوک دور باشد، ربات به آن نزدیک می‌شود
+  const distance = bot.entity.position.distanceTo(block.position)
+  if (distance > 3) {
+    const { GoalBlock } = goals
     try {
-      await bot.dig(block)
-      bot.chat(`بلوکی در ${block.position} کندن شد`)
+      await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z))
     } catch (err) {
-      console.error("خطا در کندن بلوک:", err)
-    }
-
-    // بررسی جهت‌های اطراف (بالا، پایین، چپ، راست، جلو، عقب) برای ادامه روند کندن بلوک‌های چوب
-    const directions = [
-      new Vec3(1, 0, 0),
-      new Vec3(-1, 0, 0),
-      new Vec3(0, 1, 0),
-      new Vec3(0, -1, 0),
-      new Vec3(0, 0, 1),
-      new Vec3(0, 0, -1)
-    ]
-
-    for (const dir of directions) {
-      const neighborPos = block.position.plus(dir)
-      const neighborBlock = bot.blockAt(neighborPos)
-      if (neighborBlock && neighborBlock.name.includes('log')) {
-         await digLog(neighborBlock)
-      }
+      console.error("خطا در رفتن به بلوک:", err)
     }
   }
 
-  await digLog(startBlock)
+  // تلاش برای کندن بلوک
+  try {
+    await bot.dig(block)
+    bot.chat(`کندن بلوک در ${block.position}`)
+  } catch (err) {
+    console.error("خطا در کندن بلوک:", err)
+  }
+
+  // پس از کندن، مجدداً موجودی بررسی می‌شود
+  if (countWoodLogs(bot) >= 64) {
+    stopCallback()
+    return
+  }
+
+  // بررسی بلوک‌های همجوار در ۶ جهت
+  const directions = [
+    new Vec3(1, 0, 0),
+    new Vec3(-1, 0, 0),
+    new Vec3(0, 1, 0),
+    new Vec3(0, -1, 0),
+    new Vec3(0, 0, 1),
+    new Vec3(0, 0, -1)
+  ]
+
+  for (const dir of directions) {
+    if (countWoodLogs(bot) >= 64) {
+      stopCallback()
+      break
+    }
+    const neighborPos = block.position.plus(dir)
+    const neighborBlock = bot.blockAt(neighborPos)
+    if (neighborBlock && neighborBlock.name.includes('log')) {
+      await digLog(bot, neighborBlock, visited, stopCallback)
+    }
+  }
+}
+
+// تابعی برای جستجو و کندن بلوک‌های چوب تا رسیدن به 64 عدد
+async function mine64Logs(bot) {
+  while (countWoodLogs(bot) < 64) {
+    bot.chat(`فعلا ${countWoodLogs(bot)} بلوک چوب دارم. ادامه عملیات استخراج...`)
+    // جستجو برای بلوک‌های چوب در شعاع 32 بلاک
+    const logs = bot.findBlocks({
+      matching: block => block && block.name.includes('log'),
+      maxDistance: 32,
+      count: 10
+    })
+
+    if (logs.length === 0) {
+      bot.chat("هیچ بلوک چوبی در نزدیکی پیدا نشد!")
+      return
+    }
+
+    const startBlock = bot.blockAt(logs[0])
+    let stopDigging = false
+    const stopCallback = () => { stopDigging = true }
+    const visited = new Set()
+    await digLog(bot, startBlock, visited, stopCallback)
+    // کمی وقفه قبل از جستجوی مجدد
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  bot.chat("حالا 64 بلوک چوب جمع‌آوری کردم!")
 }
 
 // راه‌اندازی ربات
