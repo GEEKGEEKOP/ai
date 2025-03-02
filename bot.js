@@ -1,153 +1,73 @@
 const mineflayer = require('mineflayer')
-const Vec3 = require('vec3').Vec3
+const { pathfinder, Movements, goals: { GoalBlock } } = require('mineflayer-pathfinder')
+const collectBlock = require('mineflayer-collectblock').plugin
 
-// تنظیمات اولیه بات
 const bot = mineflayer.createBot({
-    host: 'localhost', // سرور لوکال یا آدرس سرورت رو بذار
-    port: 22222,       // پورت سرور
-    username: 'Amirali' // اسم بات
+  host: 'localhost', // آدرس سرور
+  port: 22222, // پورت سرور
+  username: 'Bot' // نام کاربری ربات
 })
 
-// وقتی بات وارد سرور شد
+bot.loadPlugin(pathfinder)
+bot.loadPlugin(collectBlock)
+
 bot.once('spawn', () => {
-    console.log('بات وارد شد! شروع ماموریت...')
-    checkInventoryAndStart()
-})
+  const mcData = require('minecraft-data')(bot.version)
+  const defaultMove = new Movements(bot, mcData)
+  bot.pathfinder.setMovements(defaultMove)
 
-// تابع اصلی برای چک کردن اینونتوری و شروع کار
-async function checkInventoryAndStart() {
-    try {
-        const logCount = countLogsInInventory()
-        console.log(`تعداد log داخل اینونتوری: ${logCount}`)
+  const logId = mcData.itemsByName.oak_log.id
+  const plankId = mcData.itemsByName.oak_planks.id
+  const stickId = mcData.itemsByName.stick.id
+  const craftingTableId = mcData.itemsByName.crafting_table.id
 
-        if (logCount < 10) {
-            console.log('log کافی نیست! می‌رم جمع کنم...')
-            await gatherLogs(10 - logCount)
-        }
-
-        console.log('log‌ها جمع شدن! حالا تبدیل به plank...')
-        await convertLogsToPlanks()
-        await craftSticks()
-        await craftCraftingTable()
-        await craftBasicTools()
-        await dropAllItems()
-
-        console.log('ماموریت تموم شد!')
-    } catch (error) {
-        console.error('یه مشکلی پیش اومد:', error)
+  async function checkLogsAndCollect() {
+    let logCount = bot.inventory.count(logId)
+    if (logCount < 10) {
+      const logBlocks = bot.findBlocks({
+        matching: logId,
+        maxDistance: 64,
+        count: 10 - logCount
+      })
+      for (const logBlock of logBlocks) {
+        await bot.collectBlock.collect(bot.blockAt(logBlock.position))
+      }
     }
-}
+  }
 
-// تابع شمارش log‌ها تو اینونتوری
-function countLogsInInventory() {
-    const logs = bot.inventory.items().filter(item => 
-        item.name.includes('log')
-    )
-    return logs.reduce((total, log) => total + log.count, 0)
-}
-
-// جمع‌آوری log از درخت‌ها
-async function gatherLogs(amountNeeded) {
-    while (countLogsInInventory() < 10) {
-        const treeBlock = bot.findBlock({
-            matching: block => block.name.includes('log'),
-            maxDistance: 32
-        })
-
-        if (!treeBlock) {
-            console.log('درختی پیدا نکردم! می‌گردم...')
-            await exploreArea()
-            continue
-        }
-
-        await bot.pathfinder.goto(new Vec3(treeBlock.position))
-        await bot.dig(treeBlock)
-        await sleep(500) // یه کم صبر برای جمع شدن آیتم‌ها
-    }
-}
-
-// گشتن تو محیط اگه درخت پیدا نشد
-async function exploreArea() {
-    const randomX = bot.entity.position.x + (Math.random() * 20 - 10)
-    const randomZ = bot.entity.position.z + (Math.random() * 20 - 10)
-    const y = bot.entity.position.y
-
-    await bot.pathfinder.goto(new Vec3(randomX, y, randomZ))
-}
-
-// تبدیل log به plank
-async function convertLogsToPlanks() {
-    const logItem = bot.inventory.items().find(item => item.name.includes('log'))
-    if (!logItem) return
-
-    await bot.craft(bot.registry.itemsByName['planks'].id, 10, null)
-    console.log('10 تا plank درست شد!')
-}
-
-// ساخت 10 تا stick
-async function craftSticks() {
-    const plankItem = bot.inventory.items().find(item => item.name.includes('planks'))
-    if (!plankItem || plankItem.count < 4) {
-        console.log('plank کافی نیست برای stick!')
-        return
+  async function craftPlanksAndSticks() {
+    const craftingTable = bot.inventory.findInventoryItem(craftingTableId)
+    if (!craftingTable) {
+      const plankCount = bot.inventory.count(plankId)
+      if (plankCount < 5) {
+        await bot.craft(mcData.recipes[bot.version].find(r => r.result.id === plankId), 1)
+      }
+      await bot.craft(mcData.recipes[bot.version].find(r => r.result.id === craftingTableId), 1)
     }
 
-    await bot.craft(bot.registry.itemsByName['stick'].id, 10, null)
-    console.log('10 تا stick درست شد!')
-}
-
-// ساخت crafting table
-async function craftCraftingTable() {
-    const plankItem = bot.inventory.items().find(item => item.name.includes('planks'))
-    if (!plankItem || plankItem.count < 4) {
-        console.log('plank کافی نیست برای crafting table!')
-        return
+    const stickCount = bot.inventory.count(stickId)
+    if (stickCount < 10) {
+      await bot.craft(mcData.recipes[bot.version].find(r => r.result.id === stickId), 5)
     }
+  }
 
-    await bot.craft(bot.registry.itemsByName['crafting_table'].id, 1, null)
-    console.log('crafting table درست شد!')
-    await placeCraftingTable()
-}
-
-// گذاشتن crafting table تو محیط
-async function placeCraftingTable() {
-    const tableItem = bot.inventory.items().find(item => item.name === 'crafting_table')
-    if (!tableItem) return
-
-    const position = bot.entity.position.offset(1, 0, 0)
-    await bot.equip(tableItem, 'hand')
-    await bot.placeBlock(bot.blockAt(position.offset(0, -1, 0)), new Vec3(0, 1, 0))
-    console.log('crafting table قرار داده شد!')
-}
-
-// ساخت ابزارهای اولیه چوبی
-async function craftBasicTools() {
-    const stickItem = bot.inventory.items().find(item => item.name === 'stick')
-    const plankItem = bot.inventory.items().find(item => item.name.includes('planks'))
-    
-    if (!stickItem || !plankItem) return
-
-    const tools = ['wooden_pickaxe', 'wooden_axe']
-    for (const tool of tools) {
-        await bot.craft(bot.registry.itemsByName[tool].id, 1, bot.nearestEntity(e => e.name === 'crafting_table'))
-        console.log(`${tool} درست شد!`)
-    }
-}
-
-// دراپ کردن همه آیتم‌های اینونتوری
-async function dropAllItems() {
+  async function dropInventory() {
     const items = bot.inventory.items()
     for (const item of items) {
-        await bot.tossStack(item)
+      await bot.tossStack(item)
     }
-    console.log('همه آیتم‌ها دراپ شدن!')
-}
+  }
 
-// تابع کمکی برای صبر کردن
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-// مدیریت خطاها
-bot.on('error', (err) => console.log('یه خطا پیش اومد:', err))
-bot.on('kicked', (reason) => console.log('کیک شدم:', reason))
+  bot.on('chat', async (username, message) => {
+    if (message === 'start') {
+      try {
+        await checkLogsAndCollect()
+        await craftPlanksAndSticks()
+        await dropInventory()
+        bot.chat('All tasks completed and inventory dropped.')
+      } catch (err) {
+        bot.chat(`Error: ${err.message}`)
+      }
+    }
+  })
+})
