@@ -1,114 +1,153 @@
 const mineflayer = require('mineflayer')
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
-const Vec3 = require('vec3')
+const Vec3 = require('vec3').Vec3
 
-// ایجاد بات با مشخصات لازم (هاست، پورت، نام کاربری)
+// تنظیمات اولیه بات
 const bot = mineflayer.createBot({
-  host: 'localhost',   // آدرس سرور (در صورت نیاز تغییر دهید)
-    port: 22222,         // پورت سرور
-  username: 'Bot'      // نام کاربری بات
+    host: 'localhost', // سرور لوکال یا آدرس سرورت رو بذار
+    port: 22222,       // پورت سرور
+    username: 'Amirali' // اسم بات
 })
 
-// بارگذاری پلاگین pathfinder جهت حرکت در محیط
-bot.loadPlugin(pathfinder)
-
-// زمانی که بات وارد بازی شد، وظایف اصلی اجرا می‌شوند
+// وقتی بات وارد سرور شد
 bot.once('spawn', () => {
-  bot.chat("بات وارد بازی شد!")
-  runBotTasks()
+    console.log('بات وارد شد! شروع ماموریت...')
+    checkInventoryAndStart()
 })
 
-// تابع شمارش آیتم‌ها در اینونتری بر اساس نام آیتم
-function countItem(itemName) {
-  return bot.inventory.items().reduce((sum, item) => {
-    if (item.name === itemName) {
-      return sum + item.count
-    }
-    return sum
-  }, 0)
-}
-
-// تابع جمع‌آوری log (oak_log) تا زمانی که تعداد مورد نظر (targetCount) به دست آید
-async function gatherLogs(targetCount) {
-  bot.chat("شروع جمع‌آوری logها.")
-  while (countItem('oak_log') < targetCount) {
-    const logBlock = bot.findBlock({
-      matching: block => block.name === 'oak_log',
-      maxDistance: 64
-    })
-    if (!logBlock) {
-      bot.chat("هیچ log مناسبی پیدا نشد، کمی صبر کنید...")
-      await new Promise(resolve => setTimeout(resolve, 5000))
-      continue
-    }
+// تابع اصلی برای چک کردن اینونتوری و شروع کار
+async function checkInventoryAndStart() {
     try {
-      await bot.dig(logBlock)
-      bot.chat("یک log جمع‌آوری شد.")
-    } catch (err) {
-      bot.chat("خطا در کندن log: " + err.message)
+        const logCount = countLogsInInventory()
+        console.log(`تعداد log داخل اینونتوری: ${logCount}`)
+
+        if (logCount < 10) {
+            console.log('log کافی نیست! می‌رم جمع کنم...')
+            await gatherLogs(10 - logCount)
+        }
+
+        console.log('log‌ها جمع شدن! حالا تبدیل به plank...')
+        await convertLogsToPlanks()
+        await craftSticks()
+        await craftCraftingTable()
+        await craftBasicTools()
+        await dropAllItems()
+
+        console.log('ماموریت تموم شد!')
+    } catch (error) {
+        console.error('یه مشکلی پیش اومد:', error)
     }
-  }
-  bot.chat("تعداد لازم logها جمع‌آوری شد.")
 }
 
-// تابع ساخت آیتم‌ها با استفاده از recipes موجود
-async function craftItem(itemName, count, craftingTable = null) {
-  // اطمینان از بارگذاری کامل recipeها
-  await bot.waitForTicks(1)
-  const recipes = bot.recipesAll(itemName, null, craftingTable)
-  if (recipes.length === 0) {
-    bot.chat(`راهنمای ساخت برای ${itemName} پیدا نشد.`)
-    return false
-  }
-  const recipe = recipes[0]
-  try {
-    await bot.craft(recipe, count, craftingTable)
-    bot.chat(`ساخت ${count} عدد ${itemName} انجام شد.`)
-    return true
-  } catch (err) {
-    bot.chat(`خطا در ساخت ${itemName}: ${err.message}`)
-    return false
-  }
+// تابع شمارش log‌ها تو اینونتوری
+function countLogsInInventory() {
+    const logs = bot.inventory.items().filter(item => 
+        item.name.includes('log')
+    )
+    return logs.reduce((total, log) => total + log.count, 0)
 }
 
-// تابع انداختن (drop) تمام آیتم‌های موجود در اینونتری
-function dropAllItems() {
-  const items = bot.inventory.items()
-  for (const item of items) {
-    try {
-      bot.tossStack(item)
-    } catch (err) {
-      bot.chat(`خطا در انداختن ${item.name}: ${err.message}`)
+// جمع‌آوری log از درخت‌ها
+async function gatherLogs(amountNeeded) {
+    while (countLogsInInventory() < 10) {
+        const treeBlock = bot.findBlock({
+            matching: block => block.name.includes('log'),
+            maxDistance: 32
+        })
+
+        if (!treeBlock) {
+            console.log('درختی پیدا نکردم! می‌گردم...')
+            await exploreArea()
+            continue
+        }
+
+        await bot.pathfinder.goto(new Vec3(treeBlock.position))
+        await bot.dig(treeBlock)
+        await sleep(500) // یه کم صبر برای جمع شدن آیتم‌ها
     }
-  }
-  bot.chat("تمام آیتم‌های اینونتری انداخته شدند.")
 }
 
-// تابع اصلی اجرای وظایف
-async function runBotTasks() {
-  // بررسی تعداد log موجود در اینونتری؛ اگر کمتر از 10 باشد، اقدام به جمع‌آوری می‌کند.
-  if (countItem('oak_log') < 10) {
-    await gatherLogs(10)
-  }
-  
-  // تبدیل logها به plank (oak_planks)
-  // فرض بر این است که هر log به صورت خودکار به plank تبدیل می‌شود.
-  const logsCount = countItem('oak_log')
-  if (logsCount > 0) {
-    // برای هر log یک بار ساخت plank انجام می‌شود.
-    for (let i = 0; i < logsCount; i++) {
-      await craftItem('oak_planks', 1) // هر فراخوانی یک log به plank تبدیل می‌کند.
+// گشتن تو محیط اگه درخت پیدا نشد
+async function exploreArea() {
+    const randomX = bot.entity.position.x + (Math.random() * 20 - 10)
+    const randomZ = bot.entity.position.z + (Math.random() * 20 - 10)
+    const y = bot.entity.position.y
+
+    await bot.pathfinder.goto(new Vec3(randomX, y, randomZ))
+}
+
+// تبدیل log به plank
+async function convertLogsToPlanks() {
+    const logItem = bot.inventory.items().find(item => item.name.includes('log'))
+    if (!logItem) return
+
+    await bot.craft(bot.registry.itemsByName['planks'].id, 10, null)
+    console.log('10 تا plank درست شد!')
+}
+
+// ساخت 10 تا stick
+async function craftSticks() {
+    const plankItem = bot.inventory.items().find(item => item.name.includes('planks'))
+    if (!plankItem || plankItem.count < 4) {
+        console.log('plank کافی نیست برای stick!')
+        return
     }
-  }
-  
-  // ساخت stick: دستور ساخت stick از دو plank است که ۴ stick تولید می‌کند.
-  // به منظور دریافت بیش از 10 عدد، سه بار ساخت انجام می‌شود.
-  await craftItem('stick', 3)
-  
-  // ساخت یک crafting table از oak_planks (معمولاً ۴ plank برای یک crafting table نیاز است)
-  await craftItem('crafting_table', 1)
-  
-  // انداختن تمام آیتم‌های موجود در اینونتری جهت بررسی
-  dropAllItems()
+
+    await bot.craft(bot.registry.itemsByName['stick'].id, 10, null)
+    console.log('10 تا stick درست شد!')
 }
 
+// ساخت crafting table
+async function craftCraftingTable() {
+    const plankItem = bot.inventory.items().find(item => item.name.includes('planks'))
+    if (!plankItem || plankItem.count < 4) {
+        console.log('plank کافی نیست برای crafting table!')
+        return
+    }
+
+    await bot.craft(bot.registry.itemsByName['crafting_table'].id, 1, null)
+    console.log('crafting table درست شد!')
+    await placeCraftingTable()
+}
+
+// گذاشتن crafting table تو محیط
+async function placeCraftingTable() {
+    const tableItem = bot.inventory.items().find(item => item.name === 'crafting_table')
+    if (!tableItem) return
+
+    const position = bot.entity.position.offset(1, 0, 0)
+    await bot.equip(tableItem, 'hand')
+    await bot.placeBlock(bot.blockAt(position.offset(0, -1, 0)), new Vec3(0, 1, 0))
+    console.log('crafting table قرار داده شد!')
+}
+
+// ساخت ابزارهای اولیه چوبی
+async function craftBasicTools() {
+    const stickItem = bot.inventory.items().find(item => item.name === 'stick')
+    const plankItem = bot.inventory.items().find(item => item.name.includes('planks'))
+    
+    if (!stickItem || !plankItem) return
+
+    const tools = ['wooden_pickaxe', 'wooden_axe']
+    for (const tool of tools) {
+        await bot.craft(bot.registry.itemsByName[tool].id, 1, bot.nearestEntity(e => e.name === 'crafting_table'))
+        console.log(`${tool} درست شد!`)
+    }
+}
+
+// دراپ کردن همه آیتم‌های اینونتوری
+async function dropAllItems() {
+    const items = bot.inventory.items()
+    for (const item of items) {
+        await bot.tossStack(item)
+    }
+    console.log('همه آیتم‌ها دراپ شدن!')
+}
+
+// تابع کمکی برای صبر کردن
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// مدیریت خطاها
+bot.on('error', (err) => console.log('یه خطا پیش اومد:', err))
+bot.on('kicked', (reason) => console.log('کیک شدم:', reason))
