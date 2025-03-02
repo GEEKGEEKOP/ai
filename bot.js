@@ -1,130 +1,99 @@
-const mineflayer = require('mineflayer')
-const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
-const Vec3 = require('vec3')
+const mineflayer = require('mineflayer');
+const pathfinder = require('mineflayer-pathfinder').pathfinder;
+const collectBlock = require('mineflayer-collectblock').plugin;
+const { GoalNear } = require('mineflayer-pathfinder').goals;
 
-// تابع کمکی برای شمارش بلوک‌های چوب در موجودی ربات
-function countWoodLogs(bot) {
-  let total = 0
-  for (const item of bot.inventory.items()) {
-    if (item.name.includes('log')) {
-      total += item.count
-    }
-  }
-  return total
-}
+const bot = mineflayer.createBot({
+  host: 'localhost',
+  port: 22222,
+  username: 'Bot'
+});
 
-// ایجاد ربات
-function createBot() {
-  const bot = mineflayer.createBot({
-    host: 'localhost',    // آدرس سرور
-    port: 35159,          // پورت سرور
-    username: 'BotName',  // نام ربات
-    version: '1.16.4'     // نسخه بازی پیشنهادی
-  })
+bot.loadPlugin(pathfinder);
+bot.loadPlugin(collectBlock);
 
-  bot.loadPlugin(pathfinder)
-
-  bot.once('spawn', () => {
-    const defaultMovements = new Movements(bot)
-    bot.pathfinder.setMovements(defaultMovements)
-    bot.chat("ربات وارد بازی شد و آماده کار است!")
-    // شروع عملیات استخراج تا رسیدن به 64 بلوک چوب
-    mine64Logs(bot).catch(err => console.error(err))
-  })
-
-  bot.on('error', (err) => console.log(err))
-  bot.on('end', () => console.log('ربات از بازی خارج شد'))
-}
-
-// تابع بازگشتی برای کندن یک کلاستر (درخت) از بلوک‌های چوب
-async function digLog(bot, block, visited, stopCallback) {
-  if (!block) return
-  const posKey = `${block.position.x},${block.position.y},${block.position.z}`
-  if (visited.has(posKey)) return
-  if (!block.name.includes('log')) return
-  visited.add(posKey)
-
-  // اگر موجودی 64 بلوک چوب یا بیشتر شده باشد، عملیات متوقف می‌شود
-  if (countWoodLogs(bot) >= 64) {
-    stopCallback()
-    return
-  }
-
-  // اگر بلوک دور باشد، ربات به آن نزدیک می‌شود
-  const distance = bot.entity.position.distanceTo(block.position)
-  if (distance > 3) {
-    const { GoalBlock } = goals
-    try {
-      await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z))
-    } catch (err) {
-      console.error("خطا در رفتن به بلوک:", err)
-    }
-  }
-
-  // تلاش برای کندن بلوک
+async function startProcess() {
   try {
-    await bot.dig(block)
-    bot.chat(`کندن بلوک در ${block.position}`)
+    await checkAndCollectLogs();
+    await convertLogsToPlanks();
+    await craftSticks(10);
+    await craftCraftingTable();
+    await dropAllItems();
+    console.log('✅ تمام مراحل با موفقیت انجام شد!');
   } catch (err) {
-    console.error("خطا در کندن بلوک:", err)
+    console.error('❌ خطا:', err);
   }
+}
 
-  // پس از کندن، مجدداً موجودی بررسی می‌شود
-  if (countWoodLogs(bot) >= 64) {
-    stopCallback()
-    return
+async function checkAndCollectLogs() {
+  const logs = countItems('log');
+  if (logs >= 10) {
+    console.log('📦 تعداد کافی لاگ موجود است');
+    return;
   }
+  
+  console.log('🌳 در حال جمع‌آوری لاگ...');
+  const needed = 10 - logs;
+  await collectLogs(needed);
+}
 
-  // بررسی بلوک‌های همجوار در ۶ جهت
-  const directions = [
-    new Vec3(1, 0, 0),
-    new Vec3(-1, 0, 0),
-    new Vec3(0, 1, 0),
-    new Vec3(0, -1, 0),
-    new Vec3(0, 0, 1),
-    new Vec3(0, 0, -1)
-  ]
+function countItems(name) {
+  return bot.inventory.items()
+    .filter(item => item.name.includes(name))
+    .reduce((acc, item) => acc + item.count, 0);
+}
 
-  for (const dir of directions) {
-    if (countWoodLogs(bot) >= 64) {
-      stopCallback()
-      break
-    }
-    const neighborPos = block.position.plus(dir)
-    const neighborBlock = bot.blockAt(neighborPos)
-    if (neighborBlock && neighborBlock.name.includes('log')) {
-      await digLog(bot, neighborBlock, visited, stopCallback)
+async function collectLogs(needed) {
+  const logs = bot.registry.blocksArray.filter(b => b.name.endsWith('_log'));
+  return new Promise((resolve, reject) => {
+    bot.collectBlock.collect({ blocks: logs.map(l => l.id) }, needed, err => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+async function convertLogsToPlanks() {
+  const logs = bot.inventory.items().filter(item => item.name.endsWith('_log'));
+  
+  for (const log of logs) {
+    const plankType = log.name.replace('_log', '_planks');
+    const recipe = bot.recipesFor(bot.mcData.itemsByName[plankType].id, null, 1)[0];
+    
+    if (recipe) {
+      console.log(`🪵 تبدیل ${log.name} به پلنک...`);
+      await bot.craft(recipe, 1, null);
     }
   }
 }
 
-// تابعی برای جستجو و کندن بلوک‌های چوب تا رسیدن به 64 عدد
-async function mine64Logs(bot) {
-  while (countWoodLogs(bot) < 64) {
-    bot.chat(`فعلا ${countWoodLogs(bot)} بلوک چوب دارم. ادامه عملیات استخراج...`)
-    // جستجو برای بلوک‌های چوب در شعاع 32 بلاک
-    const logs = bot.findBlocks({
-      matching: block => block && block.name.includes('log'),
-      maxDistance: 32,
-      count: 10
-    })
-
-    if (logs.length === 0) {
-      bot.chat("هیچ بلوک چوبی در نزدیکی پیدا نشد!")
-      return
-    }
-
-    const startBlock = bot.blockAt(logs[0])
-    let stopDigging = false
-    const stopCallback = () => { stopDigging = true }
-    const visited = new Set()
-    await digLog(bot, startBlock, visited, stopCallback)
-    // کمی وقفه قبل از جستجوی مجدد
-    await new Promise(resolve => setTimeout(resolve, 1000))
+async function craftSticks(amount) {
+  console.log('🪵 در حال ساخت چوب...');
+  const needed = Math.ceil(amount / 4);
+  
+  for (let i = 0; i < needed; i++) {
+    const recipe = bot.recipesFor(bot.mcData.itemsByName['stick'].id, null, 1)
+      .find(r => r.delta.some(d => d.name.includes('planks')));
+    
+    if (recipe) await bot.craft(recipe, 1, null);
   }
-  bot.chat("حالا 64 بلوک چوب جمع‌آوری کردم!")
 }
 
-// راه‌اندازی ربات
-createBot()
+async function craftCraftingTable() {
+  console.log('🛠️ در حال ساخت کاردستی...');
+  const recipe = bot.recipesFor(bot.mcData.itemsByName['crafting_table'].id, null, 1)[0];
+  if (recipe) await bot.craft(recipe, 1, null);
+}
 
+async function dropAllItems() {
+  console.log('🗑️ در حال دور ریختن همه آیتم‌ها...');
+  for (const item of bot.inventory.items()) {
+    await bot.toss(item.type, item.metadata, item.count);
+  }
+}
+
+bot.once('spawn', startProcess);
+
+// هندل کردن خطاها
+bot.on('error', err => console.error('❌ خطای اصلی:', err));
+bot.on('end', () => console.log('🔌 اتصال قطع شد'));
