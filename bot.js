@@ -1,128 +1,229 @@
 const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
-const Vec3 = require('vec3')
+const { GoalNear } = goals
+const Vec3 = require('vec3') // برای مختصات سه بعدی
+let mcData = null // برای نگهداری اطلاعات ماینکرافت
 
-// تابع کمکی برای شمارش بلوک‌های چوب در موجودی ربات
-function countWoodLogs(bot) {
-  let total = 0
-  for (const item of bot.inventory.items()) {
-    if (item.name.includes('log')) {
-      total += item.count
-    }
-  }
-  return total
-}
 
-// ایجاد ربات
-function createBot() {
-  const bot = mineflayer.createBot({
-    host: 'localhost',    // آدرس سرور
-    port: 22222,          // پورت سرور
-    username: 'BotName',  // نام ربات
-  })
+// تنظیمات اتصال به سرور
+const bot = mineflayer.createBot({
+  host: 'localhost', // آدرس سرور را اینجا وارد کنید
+  port: 41943,      // پورت سرور
+  username: 'WoodcutterBot' // نام ربات
+})
 
-  bot.loadPlugin(pathfinder)
+// نصب پلاگین pathfinder
+bot.loadPlugin(pathfinder)
 
-  bot.once('spawn', () => {
-    const defaultMovements = new Movements(bot)
-    bot.pathfinder.setMovements(defaultMovements)
-    bot.chat("ربات وارد بازی شد و آماده کار است!")
-    // شروع عملیات استخراج تا رسیدن به 64 بلوک چوب
-    mine64Logs(bot).catch(err => console.error(err))
-  })
 
-  bot.on('error', (err) => console.log(err))
-  bot.on('end', () => console.log('ربات از بازی خارج شد'))
-}
 
-// تابع بازگشتی برای کندن یک کلاستر (درخت) از بلوک‌های چوب
-async function digLog(bot, block, visited, stopCallback) {
-  if (!block) return
-  const posKey = `${block.position.x},${block.position.y},${block.position.z}`
-  if (visited.has(posKey)) return
-  if (!block.name.includes('log')) return
-  visited.add(posKey)
+bot.once('spawn', () => {
+    mcData = require('minecraft-data')(bot.version)
+    const movements = new Movements(bot, mcData)
+    bot.pathfinder.setMovements(movements)
+    
+    findAndCollectWood()
+})
 
-  // اگر موجودی 64 بلوک چوب یا بیشتر شده باشد، عملیات متوقف می‌شود
-  if (countWoodLogs(bot) >= 64) {
-    stopCallback()
-    return
-  }
+// لیست بلاک‌های چوب درخت
+const TREE_LOGS = [
+  'oak_log',
+  'spruce_log',
+  'birch_log',
+  'jungle_log',
+  'acacia_log',
+  'dark_oak_log'
+]
 
-  // اگر بلوک دور باشد، ربات به آن نزدیک می‌شود
-  const distance = bot.entity.position.distanceTo(block.position)
-  if (distance > 3) {
-    const { GoalBlock } = goals
-    try {
-      await bot.pathfinder.goto(new GoalBlock(block.position.x, block.position.y, block.position.z))
-    } catch (err) {
-      console.error("خطا در رفتن به بلوک:", err)
-    }
-  }
+// لیست بلاک‌های برگ درخت
+const TREE_LEAVES = [
+  'oak_leaves',
+  'spruce_leaves',
+  'birch_leaves',
+  'jungle_leaves',
+  'acacia_leaves',
+  'dark_oak_leaves'
+]
 
-  // تلاش برای کندن بلوک
-  try {
-    await bot.dig(block)
-    bot.chat(`کندن بلوک در ${block.position}`)
-  } catch (err) {
-    console.error("خطا در کندن بلوک:", err)
-  }
+let isCollecting = true // وضعیت جمع‌آوری چوب
 
-  // پس از کندن، مجدداً موجودی بررسی می‌شود
-  if (countWoodLogs(bot) >= 64) {
-    stopCallback()
-    return
-  }
+bot.once('spawn', () => {
+  const mcData = require('minecraft-data')(bot.version)
+  const movements = new Movements(bot, mcData)
+  bot.pathfinder.setMovements(movements)
+  
+  // شروع فرآیند جستجوی درخت
+  findAndCollectWood()
+})
 
-  // بررسی بلوک‌های همجوار در ۶ جهت
-  const directions = [
-    new Vec3(1, 0, 0),
-    new Vec3(-1, 0, 0),
-    new Vec3(0, 1, 0),
-    new Vec3(0, -1, 0),
-    new Vec3(0, 0, 1),
-    new Vec3(0, 0, -1)
-  ]
-
-  for (const dir of directions) {
-    if (countWoodLogs(bot) >= 64) {
-      stopCallback()
+async function findAndCollectWood() {
+  while (isCollecting) {
+    // بررسی تعداد چوب‌های موجود در inventory
+    const logs = countLogs()
+    if (logs >= 15) {
+      console.log('به اندازه کافی چوب جمع شد! شروع ساخت وسایل...')
+      craftWoodenItems()
       break
     }
-    const neighborPos = block.position.plus(dir)
-    const neighborBlock = bot.blockAt(neighborPos)
-    if (neighborBlock && neighborBlock.name.includes('log')) {
-      await digLog(bot, neighborBlock, visited, stopCallback)
+
+    // پیدا کردن نزدیک‌ترین تنه درخت
+    const treeLog = findNearestBlock(TREE_LOGS, 32)
+    
+    if (!treeLog) {
+      console.log('درختی در نزدیکی پیدا نشد. در حال جستجو...')
+      // حرکت تصادفی برای پیدا کردن درخت‌های جدید
+      await randomMove()
+      continue
+    }
+
+    // حرکت به سمت درخت
+    try {
+      await bot.pathfinder.goto(new GoalNear(treeLog.position.x, treeLog.position.y, treeLog.position.z, 2))
+      await harvestTree(treeLog)
+    } catch (err) {
+      console.log('خطا در حرکت به سمت درخت:', err)
     }
   }
 }
 
-// تابعی برای جستجو و کندن بلوک‌های چوب تا رسیدن به 64 عدد
-async function mine64Logs(bot) {
-  while (countWoodLogs(bot) < 64) {
-    bot.chat(`فعلا ${countWoodLogs(bot)} بلوک چوب دارم. ادامه عملیات استخراج...`)
-    // جستجو برای بلوک‌های چوب در شعاع 32 بلاک
-    const logs = bot.findBlocks({
-      matching: block => block && block.name.includes('log'),
-      maxDistance: 32,
-      count: 10
-    })
+function findNearestBlock(blockTypes, maxDistance) {
+  return bot.findBlock({
+    matching: blockTypes.map(type => bot.registry.blocksByName[type].id),
+    maxDistance: maxDistance
+  })
+}
 
+async function harvestTree(treeLog) {
+  // شروع از پایین درخت و حرکت به سمت بالا
+  let currentPos = treeLog.position.clone()
+  let foundLog = true
+
+  while (foundLog) {
+    const block = bot.blockAt(currentPos)
+    if (!block || !TREE_LOGS.includes(block.name)) {
+      foundLog = false
+      continue
+    }
+
+    try {
+      await bot.dig(block)
+      currentPos.y += 1
+    } catch (err) {
+      console.log('خطا در کندن چوب:', err)
+      break
+    }
+  }
+}
+
+function countLogs() {
+  let count = 0
+  const inventory = bot.inventory.items()
+  
+  for (const item of inventory) {
+    if (TREE_LOGS.some(logType => item.name.includes(logType))) {
+      count += item.count
+    }
+  }
+  return count
+}
+
+async function randomMove() {
+  const x = (Math.random() - 0.5) * 20
+  const z = (Math.random() - 0.5) * 20
+  const goal = new GoalNear(bot.entity.position.x + x, bot.entity.position.y, bot.entity.position.z + z, 2)
+  await bot.pathfinder.goto(goal)
+}
+
+async function craftWoodenItems() {
+  // تبدیل چوب به تخته
+  await craftPlanks()
+  
+  // ساخت وسایل چوبی اولیه
+  await craftBasicTools()
+}
+
+
+async function craftPlanks() {
+    // اول چک می‌کنیم که آیا چوب کافی در inventory داریم
+    const logs = bot.inventory.items().filter(item => TREE_LOGS.some(logType => item.name.includes(logType)))
+    
     if (logs.length === 0) {
-      bot.chat("هیچ بلوک چوبی در نزدیکی پیدا نشد!")
-      return
+        console.log('چوب کافی برای ساخت تخته وجود ندارد!')
+        return
     }
 
-    const startBlock = bot.blockAt(logs[0])
-    let stopDigging = false
-    const stopCallback = () => { stopDigging = true }
-    const visited = new Set()
-    await digLog(bot, startBlock, visited, stopCallback)
-    // کمی وقفه قبل از جستجوی مجدد
-    await new Promise(resolve => setTimeout(resolve, 1000))
-  }
-  bot.chat("حالا 64 بلوک چوب جمع‌آوری کردم!")
+    // اول تخته چوبی می‌سازیم
+    try {
+        // تبدیل چوب به تخته
+        await bot.craft(mcData.recipes.find(recipe => 
+            recipe.result && recipe.result.name === 'oak_planks'
+        ), 1) // 1 is the crafting table position (player inventory)
+        
+        console.log('تخته چوبی ساخته شد')
+
+        // حالا میز کرافت می‌سازیم
+        const craftingTableRecipe = mcData.recipes.find(recipe => 
+            recipe.result && recipe.result.name === 'crafting_table'
+        )
+        
+        if (!craftingTableRecipe) {
+            console.log('دستور ساخت میز کرافت پیدا نشد!')
+            return
+        }
+
+        await bot.craft(craftingTableRecipe, 1)
+        console.log('میز کرافت ساخته شد')
+
+        // قرار دادن میز کرافت
+        const position = bot.entity.position
+        position.y -= 1 // یک بلاک پایین‌تر از ربات
+
+        await bot.equip(mcData.itemsByName.crafting_table.id, 'hand')
+        await bot.placeBlock(bot.blockAt(position), new Vec3(0, 1, 0))
+
+    } catch (err) {
+        console.log('خطا در ساخت میز کرافت:', err)
+    }
 }
 
-// راه‌اندازی ربات
-createBot()
+async function craftBasicTools() {
+    // لیست ابزارهای چوبی که می‌خواهیم بسازیم
+    const toolsToCraft = [
+        'wooden_axe',
+        'wooden_pickaxe',
+        'wooden_shovel',
+        'wooden_sword'
+    ]
+
+    for (const tool of toolsToCraft) {
+        try {
+            const recipe = mcData.recipes.find(r => 
+                r.result && r.result.name === tool
+            )
+            
+            if (!recipe) {
+                console.log(`دستور ساخت ${tool} پیدا نشد!`)
+                continue
+            }
+
+            await bot.craft(recipe, 1)
+            console.log(`${tool} با موفقیت ساخته شد`)
+
+        } catch (err) {
+            console.log(`خطا در ساخت ${tool}:`, err)
+        }
+    }
+}
+
+// مدیریت خطاها
+bot.on('error', (err) => {
+  console.log('خطای ربات:', err)
+})
+
+bot.on('kicked', (reason) => {
+  console.log('از سرور کیک شد:', reason)
+})
+
+bot.on('end', () => {
+  console.log('اتصال قطع شد')
+})
