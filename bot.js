@@ -7,8 +7,8 @@ let mcData = null // برای نگهداری اطلاعات ماینکرافت
 
 // تنظیمات اتصال به سرور
 const bot = mineflayer.createBot({
-  host: 'localhost', // آدرس سرور را اینجا وارد کنید
-  port: 41943,      // پورت سرور
+  host: 'amiralinoroozi06.aternos.me', // آدرس سرور را اینجا وارد کنید
+  port: 44300,      // پورت سرور
   username: 'WoodcutterBot' // نام ربات
 })
 
