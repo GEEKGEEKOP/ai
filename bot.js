@@ -2,148 +2,183 @@ const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const { GoalNear } = goals
 const Vec3 = require('vec3')
+
 let mcData = null
 let reconnectAttempts = 0
-let isCollecting = true
+let isActive = true
 
-const bot = mineflayer.createBot({
-  host: 'amiralinoroozi06.aternos.me',
-  port: 44300,
-  username: 'Bot',
-  auth: 'offline',
-  checkTimeoutInterval: 30000,
-  defaultChatPatterns: false
-})
+function createBot() {
+  const bot = mineflayer.createBot({
+    host: 'amiralinoroozi06.aternos.me',
+    port: 44300,
+    username: 'Bot',
+    auth: 'offline',
+    version: '1.21.4',
+    checkTimeoutInterval: 60000,
+    defaultChatPatterns: false
+  })
 
-bot.loadPlugin(pathfinder)
+  // مدیریت خطاهای پیشرفته
+  bot.on('error', async (err) => {
+    console.log(`خطای اتصال: ${err.message}`)
+    await sleep(5000)
+    bot.end()
+  })
 
-bot.on('error', (err) => {
-  console.log(`خطا: ${err.message}`)
-  bot.end()
-})
-
-bot.on('end', (reason) => {
-  console.log(`اتصال قطع شد: ${reason}`)
-  if (reconnectAttempts < 5) {
-    setTimeout(() => {
+  bot.on('end', async (reason) => {
+    console.log(`اتصال قطع شد: ${reason}`)
+    if (reconnectAttempts < 3) {
+      await sleep(10000)
       console.log(`تلاش مجدد #${++reconnectAttempts}`)
       createBot()
-    }, 30000)
-  } else {
-    console.log('تعداد تلاش‌ها به حداکثر رسید!')
-  }
-})
+    }
+  })
 
-bot.once('spawn', () => {
-  console.log('>> ربات با موفقیت وارد جهان شد!')
-  reconnectAttempts = 0
-  mcData = require('minecraft-data')(bot.version)
-  const movements = new Movements(bot, mcData)
-  movements.allowParkour = true
-  bot.pathfinder.setMovements(movements)
-  startCollecting()
-})
-
-async function startCollecting() {
-  while (isCollecting) {
+  bot.once('spawn', async () => {
     try {
-      if (countLogs() >= 15) {
-        console.log('به اندازه کافی چوب جمع شد!')
-        await craftWoodenItems()
-        isCollecting = false
-        break
-      }
-
-      const tree = bot.findBlock({
-        matching: block => block.name.endsWith('_log'),
-        maxDistance: 32
-      })
-
-      if (!tree) {
-        console.log('درختی یافت نشد. جستجوی مجدد...')
-        await randomMove()
-        continue
-      }
-
-      if (bot.pathfinder.isMoving()) bot.pathfinder.stop()
-      await bot.pathfinder.goto(new GoalNear(tree.position.x, tree.position.y, tree.position.z, 2))
-      await harvestTree(tree.position)
+      console.log('>> اتصال موفقیت‌آمیز!')
+      reconnectAttempts = 0
+      mcData = require('minecraft-data')(bot.version)
+      
+      // تنظیمات حرکتی پیشرفته
+      const movements = new Movements(bot, mcData)
+      movements.allowParkour = true
+      movements.scafoldingBlocks = []
+      bot.pathfinder.setMovements(movements)
+      
+      // شروع فعالیت اصلی با تاخیر
+      await sleep(3000)
+      mainLoop(bot)
     } catch (err) {
-      console.log('خطا:', err.message)
+      console.log('خطا در راه‌اندازی:', err)
+    }
+  })
+
+  return bot
+}
+
+async function mainLoop(bot) {
+  while (isActive) {
+    try {
+      await performSafeAction(bot)
+      await sleep(1000)
+    } catch (err) {
+      console.log('خطا در حلقه اصلی:', err)
       await sleep(5000)
     }
   }
 }
 
-async function harvestTree(pos) {
-  let currentPos = pos.clone()
-  while (true) {
-    const block = bot.blockAt(currentPos)
-    if (!block || !block.name.endsWith('_log')) break
-    try {
+async function performSafeAction(bot) {
+  if (countLogs(bot) < 15) {
+    await findAndCollectWood(bot)
+  } else {
+    await craftSequence(bot)
+  }
+}
+
+async function findAndCollectWood(bot) {
+  const tree = await bot.findBlock({
+    matching: block => block.name.endsWith('_log'),
+    maxDistance: 32
+  })
+
+  if (!tree) {
+    console.log('جستجوی منطقه جدید...')
+    await safeMove(bot)
+    return
+  }
+
+  console.log('یافتن درخت در موقعیت:', tree.position)
+  await safeDig(bot, tree.position)
+}
+
+async function safeMove(bot) {
+  try {
+    const x = (Math.random() - 0.5) * 15 + bot.entity.position.x
+    const z = (Math.random() - 0.5) * 15 + bot.entity.position.z
+    const goal = new GoalNear(x, bot.entity.position.y, z, 1)
+    
+    if (bot.pathfinder.isMoving()) bot.pathfinder.stop()
+    await bot.pathfinder.goto(goal)
+  } catch (err) {
+    console.log('خطا در حرکت:', err)
+  }
+}
+
+async function safeDig(bot, position) {
+  try {
+    let currentPos = position.clone()
+    for (let y = 0; y < 10; y++) {
+      const block = bot.blockAt(currentPos)
+      if (!block || !block.name.endsWith('_log')) break
+      
       await bot.dig(block)
       currentPos.y += 1
-    } catch (err) {
-      console.log('خطا در کندن:', err.message)
-      break
-    }
-  }
-}
-
-async function craftWoodenItems() {
-  try {
-    await craftItem('oak_planks', 4)
-    await craftItem('crafting_table', 1)
-    await placeCraftingTable()
-    for (const tool of ['wooden_axe', 'wooden_pickaxe', 'wooden_shovel', 'wooden_sword']) {
-      await craftItem(tool, 1)
+      await sleep(500)
     }
   } catch (err) {
-    console.log('خطا در ساخت:', err.message)
+    console.log('خطا در حفاری:', err)
   }
 }
 
-async function craftItem(name, quantity) {
+async function craftSequence(bot) {
+  try {
+    await craftItem(bot, 'oak_planks', 4)
+    await craftItem(bot, 'crafting_table', 1)
+    await placeCraftingTable(bot)
+    
+    for (const tool of ['wooden_axe', 'wooden_pickaxe', 'wooden_shovel', 'wooden_sword']) {
+      await craftItem(bot, tool, 1)
+      await sleep(1000)
+    }
+    
+    isActive = false
+    console.log('>> تمام مراحل با موفقیت انجام شد!')
+  } catch (err) {
+    console.log('خطا در ساخت:', err)
+  }
+}
+
+async function craftItem(bot, name, quantity) {
   const item = mcData.itemsByName[name]
   const recipes = bot.recipesFor(item.id, null, 1)
+  
   if (!recipes.length) throw new Error('دستور ساخت یافت نشد')
-  await bot.craft(recipes[0], quantity)
-  console.log(`ساخته شد: ${name}`)
+  
+  try {
+    await bot.craft(recipes[0], quantity)
+    console.log(`ساخته شد: ${quantity}x ${name}`)
+    await sleep(1000)
+  } catch (err) {
+    throw new Error(`خطا در ساخت ${name}: ${err.message}`)
+  }
 }
 
-async function placeCraftingTable() {
+async function placeCraftingTable(bot) {
   const table = bot.inventory.items().find(i => i.name === 'crafting_table')
-  if (!table) throw new Error('میز کرافت یافت نشد')
-  await bot.equip(table, 'hand')
-  const pos = bot.entity.position.offset(1, 0, 0)
-  await bot.placeBlock(bot.blockAt(pos), new Vec3(0, 1, 0))
+  if (!table) throw new Error('میز کارافت یافت نشد')
+  
+  try {
+    await bot.equip(table, 'hand')
+    const pos = bot.entity.position.offset(1, 0, 0)
+    await bot.placeBlock(bot.blockAt(pos), new Vec3(0, 1, 0))
+    console.log('میز کارافت قرار داده شد')
+    await sleep(1000)
+  } catch (err) {
+    throw new Error(`خطا در قراردادن میز: ${err.message}`)
+  }
 }
 
-function countLogs() {
+function countLogs(bot) {
   return bot.inventory.items()
     .filter(item => item.name.endsWith('_log'))
     .reduce((total, item) => total + item.count, 0)
-}
-
-async function randomMove() {
-  const x = (Math.random() - 0.5) * 20
-  const z = (Math.random() - 0.5) * 20
-  const goal = new GoalNear(bot.entity.position.x + x, bot.entity.position.y, bot.entity.position.z + z, 2)
-  await bot.pathfinder.goto(goal)
 }
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// ایجاد نمونه اولیه
-function createBot() {
-  return mineflayer.createBot({
-    host: 'amiralinoroozi06.aternos.me',
-    port: 44300,
-    username: 'Bot',
-    auth: 'offline',
-    checkTimeoutInterval: 30000,
-    defaultChatPatterns: false
-  })
-}
+// شروع برنامه
+createBot()
