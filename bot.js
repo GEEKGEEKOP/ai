@@ -9,8 +9,65 @@ let mcData = null // برای نگهداری اطلاعات ماینکرافت
 const bot = mineflayer.createBot({
   host: 'amiralinoroozi06.aternos.me', // آدرس سرور را اینجا وارد کنید
   port: 44300,      // پورت سرور
-  username: 'WoodcutterBot' // نام ربات
+  username: 'Bot', // نام ربات
+  auth: 'offline',
+  checkTimeoutInterval: 30000, // افزایش تایم‌اوت
+
+  defaultChatPatterns: false // غیرفعال کردن پردازش خودکار چت
 })
+
+
+
+
+  // مدیریت خطاها
+
+  bot.on('error', (err) => {
+
+    console.log(`خطا: ${err.message}`);
+
+    bot.end();
+
+  });
+
+
+  bot.on('end', (reason) => {
+
+    console.log(`اتصال قطع شد: ${reason}`);
+
+    if (reconnectAttempts < 5) {
+
+      setTimeout(() => {
+
+        console.log(`تلاش مجدد #${++reconnectAttempts}`);
+
+        createBot();
+
+      }, 30000); // افزایش تاخیر به 30 ثانیه
+
+    } else {
+
+      console.log('تعداد تلاش‌ها به حداکثر رسید!');
+
+    }
+
+  });
+
+
+  bot.on('spawn', () => {
+
+    console.log('>> ربات با موفقیت وارد جهان شد!');
+
+    reconnectAttempts = 0; // ریست شمارنده
+
+  });
+
+
+
+
+
+
+
+
 
 // نصب پلاگین pathfinder
 bot.loadPlugin(pathfinder)
