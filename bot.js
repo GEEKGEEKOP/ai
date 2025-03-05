@@ -1,61 +1,120 @@
 const mineflayer = require('mineflayer')
+
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
+
 const { GoalNear } = goals
+
 const Vec3 = require('vec3')
 
+const minecraftData = require('minecraft-data')
+
+
 let mcData = null
+
 let reconnectAttempts = 0
+
 let isActive = true
 
+
 function createBot() {
+
   const bot = mineflayer.createBot({
+
     host: 'amiralinoroozi06.aternos.me',
+
     port: 44300,
+
     username: 'Bot',
+
     auth: 'offline',
-    version: '1.21.4',
+
+    version: '1.21.4', // مشخص کردن دقیق نسخه
+
     checkTimeoutInterval: 60000,
+
     defaultChatPatterns: false
+
   })
 
-  // مدیریت خطاهای پیشرفته
+
+  // بارگذاری پلاگین قبل از هر چیز
+
+  bot.loadPlugin(pathfinder)
+
+
   bot.on('error', async (err) => {
+
     console.log(`خطای اتصال: ${err.message}`)
+
     await sleep(5000)
+
     bot.end()
+
   })
+
 
   bot.on('end', async (reason) => {
+
     console.log(`اتصال قطع شد: ${reason}`)
+
     if (reconnectAttempts < 3) {
+
       await sleep(10000)
+
       console.log(`تلاش مجدد #${++reconnectAttempts}`)
+
       createBot()
+
     }
+
   })
+
 
   bot.once('spawn', async () => {
+
     try {
+
       console.log('>> اتصال موفقیت‌آمیز!')
+
       reconnectAttempts = 0
-      mcData = require('minecraft-data')(bot.version)
+
       
-      // تنظیمات حرکتی پیشرفته
+
+      // مقداردهی minecraft-data با نسخه صحیح
+
+      mcData = minecraftData(bot.version)
+
+      
+
+      // ایجاد حرکات پس از اطمینان از بارگذاری پلاگین
+
       const movements = new Movements(bot, mcData)
+
       movements.allowParkour = true
-      movements.scafoldingBlocks = []
+
       bot.pathfinder.setMovements(movements)
+
       
-      // شروع فعالیت اصلی با تاخیر
+
       await sleep(3000)
+
       mainLoop(bot)
+
     } catch (err) {
+
       console.log('خطا در راه‌اندازی:', err)
+
     }
+
   })
 
+
   return bot
+
 }
+
+
+
 
 async function mainLoop(bot) {
   while (isActive) {
