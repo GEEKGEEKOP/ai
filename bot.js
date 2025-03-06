@@ -138,6 +138,7 @@ async function harvestTree(bot, position) {
   }
 }
 
+
 async function craftSequence(bot) {
   try {
     console.log('شروع فرآیند ساخت...')
@@ -146,6 +147,13 @@ async function craftSequence(bot) {
     if (countPlanks(bot) < 4) {
       console.log('نیاز به ساخت تخته...')
       await craftPlanks(bot)
+      await sleep(1000)
+    }
+
+    // Craft sticks if needed
+    if (!hasItem(bot, 'stick')) {
+      console.log('نیاز به ساخت چوب دستی...')
+      await craftSticks(bot)
       await sleep(1000)
     }
 
@@ -183,6 +191,8 @@ async function craftSequence(bot) {
     throw err
   }
 }
+
+
 
 async function craftPlanks(bot) {
   return new Promise(async (resolve, reject) => {
@@ -243,6 +253,8 @@ async function craftCraftingTable(bot) {
   })
 }
 
+
+
 async function craftTool(bot, toolName) {
   let window = null
   try {
@@ -270,9 +282,34 @@ async function craftTool(bot, toolName) {
     window = await bot.openBlock(craftingTable)
     console.log('میز کرافت باز شد')
 
-    // Get all recipes and find the matching one
-    const recipes = bot.recipesAll()
-    const recipe = recipes.find(r => r.result && r.result.name === toolName)
+    // Debug: Print all available recipes
+    console.log('جستجوی دستور ساخت...')
+    
+    // Try different ways to find the recipe
+    let recipe = null
+    const itemName = toolName.replace('wooden_', '')
+    const possibleNames = [
+      toolName,
+      `minecraft:${toolName}`,
+      itemName,
+      `minecraft:${itemName}`
+    ]
+
+    for (const name of possibleNames) {
+      const itemId = mcData.itemsByName[name]?.id
+      if (itemId) {
+        recipe = bot.recipesFor(itemId, null, 1, craftingTable)[0]
+        if (recipe) {
+          console.log(`دستور ساخت پیدا شد برای: ${name}`)
+          break
+        }
+      }
+    }
+
+    if (!recipe) {
+      // Try to create the recipe manually
+      recipe = createToolRecipe(bot, toolName)
+    }
 
     if (!recipe) {
       throw new Error(`دستور ساخت ${toolName} یافت نشد`)
@@ -297,6 +334,83 @@ async function craftTool(bot, toolName) {
     }
   }
 }
+
+
+// Helper function to create tool recipes manually
+function createToolRecipe(bot, toolName) {
+  const plankId = mcData.itemsByName.oak_planks.id
+  const stickId = mcData.itemsByName.stick.id
+  
+  if (!plankId || !stickId) return null
+
+  const patterns = {
+    wooden_axe: [
+      ['oak_planks', 'oak_planks', ''],
+      ['oak_planks', 'stick', ''],
+      ['', 'stick', '']
+    ],
+    wooden_pickaxe: [
+      ['oak_planks', 'oak_planks', 'oak_planks'],
+      ['', 'stick', ''],
+      ['', 'stick', '']
+    ],
+    wooden_shovel: [
+      ['', 'oak_planks', ''],
+      ['', 'stick', ''],
+      ['', 'stick', '']
+    ],
+    wooden_sword: [
+      ['', 'oak_planks', ''],
+      ['', 'oak_planks', ''],
+      ['', 'stick', '']
+    ]
+  }
+
+  const pattern = patterns[toolName]
+  if (!pattern) return null
+
+  // Convert pattern to recipe format
+  return {
+    ingredients: pattern.flat().map(item => {
+      if (!item) return null
+      return { id: mcData.itemsByName[item].id }
+    }),
+    result: { id: mcData.itemsByName[toolName].id, count: 1 }
+  }
+}
+
+// Also add this helper function to craft sticks if needed
+async function craftSticks(bot) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (hasItem(bot, 'stick')) {
+        resolve()
+        return
+      }
+
+      const recipe = bot.recipesFor(mcData.itemsByName.stick.id)[0]
+      if (!recipe) {
+        throw new Error('دستور ساخت چوب دستی یافت نشد')
+      }
+
+      console.log('شروع ساخت چوب دستی...')
+      await bot.craft(recipe, 1, null)
+      await sleep(1000)
+
+      if (hasItem(bot, 'stick')) {
+        console.log('چوب دستی با موفقیت ساخته شد')
+        resolve()
+      } else {
+        reject(new Error('خطا در ساخت چوب دستی'))
+      }
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+
+
 
 async function placeCraftingTable(bot) {
   try {
