@@ -61,7 +61,10 @@ async function mainLoop(bot) {
   while (isActive) {
     try {
       console.log('شروع حلقه اصلی...')
-      if (countLogs(bot) < 15) {
+      const logCount = countLogs(bot)
+      const plankCount = countPlanks(bot)
+      
+      if (logCount < 15 && plankCount < 4) {
         console.log('تعداد چوب کمتر از 15 است. جستجو و جمع‌آوری چوب...')
         await findAndCollectWood(bot)
       } else {
@@ -138,91 +141,190 @@ async function harvestTree(bot, position) {
 async function craftSequence(bot) {
   try {
     console.log('شروع فرآیند ساخت...')
-    if (!bot.inventory.items().some(i => i.name === 'oak_planks')) {
-      await craftItem(bot, 'oak_planks', 1)
+    
+    // Check and craft planks if needed
+    if (countPlanks(bot) < 4) {
+      console.log('نیاز به ساخت تخته...')
+      await craftPlanks(bot)
+      await sleep(1000)
     }
+
+    // Check and craft crafting table if needed
+    if (!hasCraftingTable(bot)) {
+      console.log('نیاز به ساخت میز کرافت...')
+      await craftCraftingTable(bot)
+      await sleep(1000)
+    }
+
+    // Place crafting table if not already placed
+    const nearbyTable = bot.findBlock({
+      matching: mcData.blocksByName.crafting_table.id,
+      maxDistance: 4
+    })
     
-    await craftItem(bot, 'crafting_table', 1)
-    await placeCraftingTable(bot)
-    
-    const tools = [
-      'wooden_axe',
-      'wooden_pickaxe',
-      'wooden_shovel',
-      'wooden_sword'
-    ]
-    
+    if (!nearbyTable) {
+      await placeCraftingTable(bot)
+      await sleep(1000)
+    }
+
+    // Craft wooden tools
+    const tools = ['wooden_axe', 'wooden_pickaxe', 'wooden_shovel', 'wooden_sword']
     for (const tool of tools) {
-      await craftItem(bot, tool, 1)
-      await sleep(2000)
+      if (!hasItem(bot, tool)) {
+        await craftTool(bot, tool)
+        await sleep(1000)
+      }
     }
-    
+
     isActive = false
     console.log('>> تمام مراحل با موفقیت انجام شد!')
   } catch (err) {
     console.log('خطا در فرآیند ساخت:', err.message)
+    throw err
   }
 }
 
-async function craftItem(bot, name, quantity) {
+async function craftPlanks(bot) {
   return new Promise(async (resolve, reject) => {
     try {
-      console.log(`در حال ساخت ${name}...`)
-      const item = mcData.itemsByName[name]
-      if (!item) throw new Error('آیتم یافت نشد')
-      
-      const recipes = bot.recipesFor(item.id, null, 1, false)
-      if (!recipes.length) throw new Error('دستور ساخت یافت نشد')
-      
-      bot.once('craft', (recipe) => {
-        console.log(`ساخته شد: ${quantity}x ${name}`)
+      const startPlanks = countPlanks(bot)
+      console.log('تعداد تخته قبل از ساخت:', startPlanks)
+
+      const plankRecipe = bot.recipesFor(mcData.itemsByName.oak_planks.id)[0]
+      if (!plankRecipe) {
+        throw new Error('دستور ساخت تخته یافت نشد')
+      }
+
+      console.log('شروع ساخت تخته...')
+      await bot.craft(plankRecipe, 1, null)
+      await sleep(1000)
+
+      const endPlanks = countPlanks(bot)
+      console.log('تعداد تخته بعد از ساخت:', endPlanks)
+
+      if (endPlanks > startPlanks) {
+        console.log('تخته با موفقیت ساخته شد')
         resolve()
-      })
-
-      bot.craft(recipes[0], quantity, null, (err) => {
-        if (err) {
-          console.log(`خطا در ساخت ${name}: ${err.message}`)
-          reject(`خطا در ساخت ${name}: ${err.message}`)
-        }
-      })
-
-      // Add a timeout to ensure the crafting process doesn't hang
-      setTimeout(() => {
-        reject(`ساخت ${name} به تایم‌اوت رسید`)
-      }, 20000)
+      } else {
+        reject(new Error('خطا در ساخت تخته'))
+      }
     } catch (err) {
-      reject(`خطا در ساخت ${name}: ${err.message}`)
+      reject(err)
     }
   })
 }
 
-async function placeCraftingTable(bot) {
-  try {
-    console.log('در حال قرار دادن میز کاردستی...')
-    const table = bot.inventory.items().find(i => i.name === 'crafting_table')
-    if (!table) throw new Error('میز کاردستی در اینونتوری وجود ندارد')
-    
-    await bot.equip(table, 'hand')
-    const pos = bot.entity.position.offset(1, 0, 0)
-    const referenceBlock = bot.blockAt(pos)
-    if (!referenceBlock) throw new Error('بلاک مرجع برای قرار دادن میز کاردستی پیدا نشد')
-    
-    await bot.placeBlock(referenceBlock, new Vec3(0, 1, 0))
-    console.log('میز کاردستی قرار داده شد')
-    await sleep(1000)
+async function craftCraftingTable(bot) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (hasCraftingTable(bot)) {
+        resolve()
+        return
+      }
 
-    // اطمینان از استفاده از میز کاردستی
+      const recipe = bot.recipesFor(mcData.itemsByName.crafting_table.id)[0]
+      if (!recipe) {
+        throw new Error('دستور ساخت میز کرافت یافت نشد')
+      }
+
+      console.log('شروع ساخت میز کرافت...')
+      await bot.craft(recipe, 1, null)
+      await sleep(1000)
+
+      if (hasCraftingTable(bot)) {
+        console.log('میز کرافت با موفقیت ساخته شد')
+        resolve()
+      } else {
+        reject(new Error('خطا در ساخت میز کرافت'))
+      }
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+async function craftTool(bot, toolName) {
+  let window = null
+  try {
+    if (hasItem(bot, toolName)) {
+      return
+    }
+
+    // Find crafting table
     const craftingTable = bot.findBlock({
       matching: mcData.blocksByName.crafting_table.id,
-      maxDistance: 6
+      maxDistance: 4
     })
-    if (!craftingTable) throw new Error('میز کاردستی پیدا نشد')
-    const craftingTableWindow = await bot.openBlock(craftingTable)
-    console.log('میز کاردستی باز شد')
-    await sleep(1000)
-    craftingTableWindow.close()
+
+    if (!craftingTable) {
+      throw new Error('میز کرافت در نزدیکی یافت نشد')
+    }
+
+    // Ensure we have enough planks
+    const planksNeeded = toolName === 'wooden_sword' ? 2 : 3
+    if (countPlanks(bot) < planksNeeded) {
+      await craftPlanks(bot)
+    }
+
+    // Open crafting table
+    window = await bot.openBlock(craftingTable)
+    console.log('میز کرافت باز شد')
+
+    // Get all recipes and find the matching one
+    const recipes = bot.recipesAll()
+    const recipe = recipes.find(r => r.result && r.result.name === toolName)
+
+    if (!recipe) {
+      throw new Error(`دستور ساخت ${toolName} یافت نشد`)
+    }
+
+    // Craft the tool
+    console.log(`شروع ساخت ${toolName}...`)
+    await bot.craft(recipe, 1, craftingTable)
+    await sleep(500)
+
+    if (hasItem(bot, toolName)) {
+      console.log(`${toolName} با موفقیت ساخته شد`)
+    } else {
+      throw new Error(`خطا در ساخت ${toolName}`)
+    }
   } catch (err) {
-    throw new Error(`خطا در قراردادن میز: ${err.message}`)
+    console.log(`خطا در ساخت ${toolName}:`, err.message)
+    throw err
+  } finally {
+    if (window) {
+      window.close()
+    }
+  }
+}
+
+async function placeCraftingTable(bot) {
+  try {
+    console.log('تلاش برای قرار دادن میز کرافت...')
+    
+    const craftingTable = bot.inventory.items().find(item => item.name === 'crafting_table')
+    if (!craftingTable) {
+      throw new Error('میز کرافت در کوله‌پشتی یافت نشد')
+    }
+
+    await bot.equip(craftingTable, 'hand')
+    await sleep(500)
+
+    // Find a suitable place to put the crafting table
+    const pos = bot.entity.position.offset(1, -1, 0)
+    const block = bot.blockAt(pos)
+    
+    if (!block || block.name === 'air') {
+      throw new Error('مکان مناسب برای قرار دادن میز کرافت یافت نشد')
+    }
+
+    await bot.placeBlock(block, new Vec3(0, 1, 0))
+    console.log('میز کرافت با موفقیت قرار داده شد')
+    await sleep(500)
+
+  } catch (err) {
+    console.log('خطا در قرار دادن میز کرافت:', err.message)
+    throw err
   }
 }
 
@@ -245,6 +347,20 @@ function countLogs(bot) {
     .reduce((total, item) => total + item.count, 0)
   console.log(`تعداد چوب: ${logCount}`)
   return logCount
+}
+
+function countPlanks(bot) {
+  return bot.inventory.items()
+    .filter(item => item?.name === 'oak_planks')
+    .reduce((total, item) => total + item.count, 0)
+}
+
+function hasCraftingTable(bot) {
+  return bot.inventory.items().some(item => item.name === 'crafting_table')
+}
+
+function hasItem(bot, itemName) {
+  return bot.inventory.items().some(item => item.name === itemName)
 }
 
 function sleep(ms) {
