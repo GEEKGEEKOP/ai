@@ -103,7 +103,7 @@ async function moveToTarget(bot, position) {
       position.x,
       position.y,
       position.z,
-      1 // فاصله مجاز از هدف
+      1
     )
     
     await bot.pathfinder.goto(goal)
@@ -131,16 +131,13 @@ async function harvestTree(bot, position) {
 
 async function craftSequence(bot) {
   try {
-    // ساخت تخته چوبی
-    await craftItem(bot, 'oak_planks', 4)
+    if (!bot.inventory.items().some(i => i.name === 'oak_planks')) {
+      await craftItem(bot, 'oak_planks', 1)
+    }
     
-    // ساخت میز کاردستی
     await craftItem(bot, 'crafting_table', 1)
-    
-    // قرار دادن میز کاردستی
     await placeCraftingTable(bot)
     
-    // ساخت ابزارها
     const tools = [
       'wooden_axe',
       'wooden_pickaxe',
@@ -165,7 +162,7 @@ async function craftItem(bot, name, quantity) {
     const item = mcData.itemsByName[name]
     if (!item) throw new Error('آیتم یافت نشد')
     
-    const recipes = bot.recipesFor(item.id, null, 1, null)
+    const recipes = bot.recipesFor(item.id, null, 1, false)
     if (!recipes.length) throw new Error('دستور ساخت یافت نشد')
     
     await bot.craft(recipes[0], quantity)
@@ -201,5 +198,4 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// شروع برنامه
 createBot()
